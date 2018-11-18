@@ -2,7 +2,7 @@ import React from 'react';
 import Link from '../../Link/index';
 import gql from 'graphql-tag';
 import { graphql, Mutation } from 'react-apollo';
-import { GET_REPOSITORIES_OF_CURRENT_USER } from '../queries';
+import { GET_REPOSITORIES_OF_CURRENT_USER, REPOSITORY_FRAGMENT } from '../queries';
 
 const ADD_STAR = gql`
     mutation($id: ID!) {
@@ -32,12 +32,84 @@ const UPDATE_SUBSCRIPTION = gql`
     mutation($id: ID!, $state: SubscriptionState!) {
         updateSubscription(input: { subscribableId: $id, state: $state }) {
           subscribable {
-            id
+            id,
+            viewerSubscription
           }
         }
       }
     `
 ;
+
+const updateAddStar = (
+    client,
+    {data: { addStar: { starrable: {id}}}}
+) => {
+    const repository = client.readFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+    });
+
+    const totalCount = repository.stargazers.totalCount + 1;
+
+    client.writeFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+        data: {
+            ...repository,
+            stargazers: {
+                ...repository.stargazers,
+                totalCount,
+            }
+        }
+    })
+};
+
+const updateRemoveStar = (
+    client,
+    {data: { removeStar: { starrable: {id}}}}
+) => {
+    const repository = client.readFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+    });
+    const totalCount = repository.stargazers.totalCount - 1;
+
+    client.writeFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+        data: {
+            ...repository,
+            stargazers: {
+                ...repository.stargazers,
+                totalCount,
+            }
+        }
+    })
+};
+
+const updateUpdateSubscription = (
+    client,
+    {data: { updateSubscription: { subscribable: {id, viewerSubscription}}}}
+) => {
+    const repository = client.readFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+    });
+
+    const totalCount = viewerSubscription === 'UNSUBSCRIBED' ? repository.watchers.totalCount - 1 : repository.watchers.totalCount + 1;
+
+    client.writeFragment({
+        id: `Repository:${id}`,
+        fragment: REPOSITORY_FRAGMENT,
+        data: {
+            ...repository,
+            watchers: {
+                ...repository.watchers,
+                totalCount,
+            }
+        }
+    })
+};
 
 const RepositoryItem = ({
     id,
@@ -53,30 +125,29 @@ const RepositoryItem = ({
     mutate,
 }) =>
     {
-        const handleUpdateSubscription = () => {
-            mutate({
-                variables: { id, state: viewerSubscription === 'UNSUBSCRIBED' ? 'SUBSCRIBED' : 'UNSUBSCRIBED'},
-                refetchQueries: [ {query: GET_REPOSITORIES_OF_CURRENT_USER}]
-            })
-        };
+        // const handleUpdateSubscription = () => {
+        //     mutate({
+        //         variables: { id, state: viewerSubscription === 'UNSUBSCRIBED' ? 'SUBSCRIBED' : 'UNSUBSCRIBED'},
+        //         refetchQueries: [ {query: GET_REPOSITORIES_OF_CURRENT_USER}]
+        //     })
+        // };
 
         return (<div>
             <div className="RepositoryItem-title">
                 <h2>
                     <Link href={url}>{name}</Link>
-                    {viewerSubscription === 'UNSUBSCRIBED' ? (
+                    {
+                        <Mutation mutation={UPDATE_SUBSCRIPTION} variables={{id, state: viewerSubscription === 'UNSUBSCRIBED' ? 'SUBSCRIBED' : 'UNSUBSCRIBED'}} update={updateUpdateSubscription}>
+                            {(updateSubscription) => (
                                 <button
-                                    onClick={handleUpdateSubscription}>{watchers.totalCount} Subcscribe
+                                    onClick={updateSubscription}>{watchers.totalCount} {viewerSubscription === 'UNSUBSCRIBED' ? 'Subscribe' : 'Unsubscribe'}
                                 </button>
-                    ) : (
-                                <button
-                                    onClick={handleUpdateSubscription}>{watchers.totalCount} Unsubcscribe
-                                </button>
-                    )}
-
+                            )}
+                        </Mutation>
+                    }
                 </h2>
                 {!viewerHasStarred ? (
-                    <Mutation mutation={ADD_STAR} variables={{id}}>
+                    <Mutation mutation={ADD_STAR} variables={{id}} update={updateAddStar}>
                         {(addStar) => (
                             <button
                                 onClick={addStar}>{stargazers.totalCount} Stars
@@ -85,7 +156,7 @@ const RepositoryItem = ({
                     </Mutation>
                 ) :
                     (
-                        <Mutation mutation={REMOVE_STAR} variables={{id}}>
+                        <Mutation mutation={REMOVE_STAR} variables={{id}} update={updateRemoveStar}>
                             {(removeStar) => (
                                 <button
                                     onClick={removeStar}>{stargazers.totalCount} Stars
@@ -121,4 +192,4 @@ const RepositoryItem = ({
     };
 
 
-export default graphql(UPDATE_SUBSCRIPTION)(RepositoryItem);
+export default RepositoryItem;
